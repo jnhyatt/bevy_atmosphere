@@ -13,9 +13,10 @@ use bevy::{
         render_graph::{self, RenderGraph, RenderLabel},
         render_resource::{
             BindGroup, BindGroupEntries, BindGroupLayout, BindGroupLayoutEntry, BindingResource,
-            BindingType, CachedPipelineState, ComputePassDescriptor, Extent3d, PipelineCache,
-            ShaderStages, StorageTextureAccess, TextureAspect, TextureDescriptor, TextureDimension,
-            TextureFormat, TextureUsages, TextureView, TextureViewDescriptor, TextureViewDimension,
+            BindingType, CachedPipelineState, Extent3d, PipelineCache, RenderPassColorAttachment,
+            RenderPassDescriptor, ShaderStages, StorageTextureAccess, TextureAspect,
+            TextureDescriptor, TextureDimension, TextureFormat, TextureUsages, TextureView,
+            TextureViewDescriptor, TextureViewDimension,
         },
         renderer::RenderDevice,
         texture::{FallbackImage, GpuImage},
@@ -145,7 +146,6 @@ impl Plugin for AtmospherePipelinePlugin {
                 (
                     prepare_atmosphere_resources.in_set(RenderSet::PrepareResources),
                     prepare_atmosphere_bind_group.in_set(RenderSet::PrepareBindGroups),
-                    clear_update_events.in_set(RenderSet::Cleanup),
                 ),
             );
 
@@ -368,7 +368,7 @@ fn prepare_atmosphere_bind_group(
     image_bind_group_layout: Res<AtmosphereImageBindGroupLayout>,
     atmosphere: Option<Res<AtmosphereModel>>,
 ) {
-    let view = atmosphere_image.array_view.as_ref().expect("prepare_changed_settings should have took care of making AtmosphereImage.array_value Some(TextureView)");
+    let view = atmosphere_image.array_view.as_ref().expect("prepare_changed_settings should have taken care of making AtmosphereImage.array_value Some(TextureView)");
 
     let atmosphere = match atmosphere {
         Some(a) => a.clone(),
@@ -466,7 +466,7 @@ impl render_graph::Node for AtmosphereNode {
                 let pipeline_cache = world.resource::<PipelineCache>();
 
                 if let CachedPipelineState::Ok(_) =
-                    pipeline_cache.get_compute_pipeline_state(pipeline)
+                    pipeline_cache.get_render_pipeline_state(pipeline)
                 {
                     let mut event_writer = world.resource_mut::<Events<AtmosphereUpdateEvent>>();
                     event_writer.send(AtmosphereUpdateEvent);
@@ -493,37 +493,41 @@ impl render_graph::Node for AtmosphereNode {
                     let pipeline_cache = world.resource::<PipelineCache>();
                     let cached_metadata = world.resource::<CachedAtmosphereModelMetadata>();
                     let settings = world.resource::<AtmosphereSettings>();
+                    let image = world.resource::<AtmosphereImage>();
 
                     let pipeline = {
-                        let data = cached_metadata.0.clone().expect("Failed to get type data!");
-                        data.pipeline
+                        cached_metadata
+                            .0
+                            .clone()
+                            .expect("Failed to get type data!")
+                            .pipeline
                     };
 
-                    let mut pass = render_context.command_encoder().begin_compute_pass(
-                        &ComputePassDescriptor {
-                            label: Some("atmosphere_pass"),
-                            timestamp_writes: None,
-                        },
-                    );
+                    let mut pass =
+                        render_context
+                            .command_encoder()
+                            .begin_render_pass(&RenderPassDescriptor {
+                                label: Some("atmosphere_pass"),
+                                color_attachments: &[Some(RenderPassColorAttachment {
+                                    view: &image.array_view.as_ref().unwrap(),
+                                    resolve_target: default(),
+                                    ops: default(),
+                                })],
+                                depth_stencil_attachment: None,
+                                timestamp_writes: None,
+                                occlusion_query_set: None,
+                            });
 
                     pass.set_bind_group(0, &bind_groups.0, &[]);
                     pass.set_bind_group(1, &bind_groups.1, &[]);
 
-                    let update_pipeline = pipeline_cache.get_compute_pipeline(pipeline).unwrap();
+                    let update_pipeline = pipeline_cache.get_render_pipeline(pipeline).unwrap();
                     pass.set_pipeline(update_pipeline);
-                    pass.dispatch_workgroups(
-                        settings.resolution / WORKGROUP_SIZE,
-                        settings.resolution / WORKGROUP_SIZE,
-                        6,
-                    );
+                    pass.draw(0..3, 0..1);
                 }
             }
         }
 
         Ok(())
     }
-}
-
-fn clear_update_events(mut update_events: ResMut<Events<AtmosphereUpdateEvent>>) {
-    update_events.clear();
 }

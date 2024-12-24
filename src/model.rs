@@ -36,7 +36,7 @@ use bevy::{
     render::{
         extract_resource::ExtractResource,
         render_asset::RenderAssets,
-        render_resource::{BindGroup, BindGroupLayout, CachedComputePipelineId},
+        render_resource::{BindGroup, BindGroupLayout, CachedRenderPipelineId},
         renderer::RenderDevice,
         texture::{FallbackImage, GpuImage},
     },
@@ -80,7 +80,7 @@ pub struct AtmosphereModelMetadata {
     /// Used to create the `BindGroup`.
     pub bind_group_layout: BindGroupLayout,
     /// Used to get the shader's pipeline.
-    pub pipeline: CachedComputePipelineId,
+    pub pipeline: CachedRenderPipelineId,
 }
 
 /// A trait for registering [`AtmosphereModelMetadata`].
@@ -158,29 +158,5 @@ impl AtmosphereModel {
     /// Convert the underlying model to a mutable reference of the specified [`Atmospheric`] model.
     pub fn to_mut<T: Atmospheric>(&mut self) -> Option<&mut T> {
         Atmospheric::as_reflect_mut(&mut *self.model).downcast_mut()
-    }
-}
-
-cfg_if::cfg_if! {
-    if #[cfg(feature = "nishita")] {
-        impl Default for AtmosphereModel {
-            fn default() -> Self {
-                use crate::collection::nishita::Nishita;
-                Self::new(Nishita::default())
-            }
-        }
-    } else if #[cfg(feature = "gradient")] {
-        impl Default for AtmosphereModel {
-            fn default() -> Self {
-                use crate::collection::gradient::Gradient;
-                Self::new(Gradient::default())
-            }
-        }
-    } else {
-        impl Default for AtmosphereModel {
-            fn default() -> Self {
-                panic!("Enable at least one atmospheric model!");
-            }
-        }
     }
 }

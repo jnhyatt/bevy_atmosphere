@@ -77,9 +77,6 @@ impl Plugin for AtmospherePlugin {
 
         render_app.init_resource::<AtmosphereImageBindGroupLayout>();
 
-        #[cfg(feature = "gradient")]
-        app.add_atmosphere_model::<crate::collection::gradient::Gradient>();
-
         #[cfg(feature = "nishita")]
         app.add_atmosphere_model::<crate::collection::nishita::Nishita>();
     }

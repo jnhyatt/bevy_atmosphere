@@ -1,4 +1,3 @@
-
 struct Nishita {
     ray_origin: vec3<f32>,
     sun_position: vec3<f32>,
@@ -122,6 +121,171 @@ fn render_nishita(r_full: vec3<f32>, r0: vec3<f32>, p_sun_full: vec3<f32>, i_sun
     return i_sun * (p_rlh * k_rlh * total_rlh + p_mie * k_mie * total_mie);
 }
 
+struct Intersections {
+    near: f32,
+    far: f32,
+}
+
+/// Returns Bounds { near, far } where near and far are non-negative intersection distances.
+/// If no intersection, returns near = -1.0 and far = -1.0.
+fn intersect_ray_sphere(start: vec3<f32>, dir: vec3<f32>, radius: f32) -> Intersections {
+    let a = dot(dir, dir);
+    let b = 2.0 * dot(start, dir);
+    let c = dot(start, start) - radius * radius;
+
+    // Solve the quadratic equation: at^2 + bt + c = 0
+    let discriminant = b * b - 4.0 * a * c;
+    if discriminant < 0.0 {
+        // Line containing ray does not intersect sphere
+        return Intersections(-1.0, -1.0);
+    }
+
+    let sqrt_d = sqrt(discriminant);
+    var t1 = (-b - sqrt_d) / (2.0 * a);
+    var t2 = (-b + sqrt_d) / (2.0 * a);
+
+    if t2 < 0.0 {
+        // Sphere is behind ray
+        return Intersections(-1f, -1f);
+    }
+    t1 = max(0.0, t1);
+    return Intersections(t1, t2);
+}
+
+/// Models the decay of atmospheric parameters as height increases. Many parameters are fairly
+/// well-approximated by exponential decay, such as scattering coefficients and density. `base` is
+/// the value at sea level, `height` is the altitude of interest, and `scale_height` is the height
+/// difference required for the parameter to decay by a factor of `e`.
+fn height_decay(base: f32, height: f32, scale_height: f32) -> f32 {
+    return base * exp(-height / scale_height);
+}
+
+fn phase_rayleigh(mu: f32) -> f32 {
+    return 3.0 / (16.0 * PI) * (1.0 + mu * mu);
+}
+
+fn phase_mie(mu: f32) -> f32 {
+    /// Controls the anisotropy of the medium
+    const G: f32 = 0.76f;
+    return 3.0 / (8.0 * PI) * ((1.0 - G * G) * (mu * mu + 1.0))
+        / (pow(1.0 + G * G - 2.0 * mu * G, 1.5) * (2.0 + G * G));
+}
+
+fn atmosphere_intersections(
+    ray_origin: vec3<f32>,
+    ray_dir: vec3<f32>,
+    params: Nishita,
+) -> Intersections {
+    let air = intersect_ray_sphere(params.ray_origin, ray_dir, params.atmosphere_radius);
+    let ground = intersect_ray_sphere(params.ray_origin, ray_dir, params.planet_radius);
+    var intersections: Intersections;
+    if ground.near < 0f {
+        // We didn't hit the ground. Just use the atmosphere intersection ray.
+        if air.near < 0f {
+            return air;
+        }
+        intersections = air;
+    } else {
+        // If we hit the atmosphere *strictly* before the ground, our ray goes from the first air
+        // hit to the first ground hit. Otherwise, we're underground and our ray goes from the far
+        // ground hit to the far atmosphere hit.
+        if ground.near > air.near {
+            intersections.near = air.near;
+            intersections.far = ground.near;
+        } else {
+            intersections.near = ground.far;
+            intersections.far = air.far;
+        }
+    }
+    return intersections;
+}
+
+fn my_nishita(ray_dir: vec3<f32>, params: Nishita) -> vec3<f32> {
+    let intersections = atmosphere_intersections(params.ray_origin, ray_dir, params);
+
+    // Tranmittance between two points is determined by integrating the medium's extinction
+    // coefficient over the line between the two points. Since we're already numerically integrating
+    // over the intersection line segment, we can roll the two integrals together. We start from the
+    // nearest sample point and calculate the extinction coefficient and total sunlight scattered
+    // towards the viewer. We add the extinction coefficient to a running sum `primary_extinction`
+    // and calculate transmittance. We attenuate the incoming light by the transmittance, then
+    // repeat for the next point.
+    var primary_optical_depth_mie = 0f;
+    var primary_optical_depth_rayleigh = vec3<f32>(0f);
+    // Riemann sum to approximate the outer integral. Basically, we evenly space some points from
+    // our near intersection to our far intersection. For each point, we compute the total light
+    // from the sun at that point, multiply by the phase function to determine how much of that
+    // light gets scattered in the viewer's direction, then attenuate that light according to the
+    // optical depth between the viewer and that point. Whatever is left gets accumulated by
+    // `primary_ray_color`.
+    var primary_ray_color: vec3<f32>;
+    let sun_position = normalize(nishita.sun_position);
+    let i_step_size = (intersections.far - intersections.near) / f32(ISTEPS);
+    for (var i = 0u; i < ISTEPS; i++) {
+        let i_sample_pos =
+            params.ray_origin + ray_dir * (intersections.near + (f32(i) + 0.5) * i_step_size);
+        let secondary_intersections =
+            intersect_ray_sphere(i_sample_pos, sun_position, params.atmosphere_radius);
+        let ground_intersections =
+            intersect_ray_sphere(i_sample_pos, sun_position, params.planet_radius);
+        let blocked_by_planet = ground_intersections.near >= 0f;
+
+        var total_sunlight_at_x: vec3<f32>;
+        if blocked_by_planet {
+            total_sunlight_at_x = vec3<f32>(0f);
+        } else {
+            var secondary_optical_depth_mie = 0f;
+            var secondary_optical_depth_rayleigh = vec3<f32>(0f);
+            let j_step_size = secondary_intersections.far / f32(JSTEPS);
+            for (var j = 0u; j < JSTEPS; j++) {
+                let j_sample_pos = i_sample_pos
+                    + sun_position * (intersections.near + (f32(j) + 0.5) * j_step_size);
+
+                let height = length(j_sample_pos) - nishita.planet_radius;
+                let mie_scattering =
+                    height_decay(params.mie_coefficient, height, params.mie_scale_height);
+                let rayleigh_scale_height = params.rayleigh_scale_height;
+                let rayleigh_scattering = vec3<f32>(
+                    height_decay(params.rayleigh_coefficient.x, height, rayleigh_scale_height),
+                    height_decay(params.rayleigh_coefficient.y, height, rayleigh_scale_height),
+                    height_decay(params.rayleigh_coefficient.z, height, rayleigh_scale_height),
+                );
+                secondary_optical_depth_mie += mie_scattering * j_step_size;
+                secondary_optical_depth_rayleigh += rayleigh_scattering * j_step_size;
+            }
+            let secondary_optical_depth =
+                secondary_optical_depth_mie + secondary_optical_depth_rayleigh;
+            total_sunlight_at_x = nishita.sun_intensity * exp(-secondary_optical_depth);
+        }
+
+        let mu = dot(ray_dir, sun_position);
+        let height = length(i_sample_pos) - nishita.planet_radius;
+        // We use these scattering values for two things:
+        // - accumulating optical depth to attenuate light scattered toward the viewer
+        // - determining how much light from the secondary ray is scattered toward the viewer
+        let mie_scattering = height_decay(params.mie_coefficient, height, params.mie_scale_height);
+        let mie_intensity = mie_scattering * phase_mie(mu);
+        let rayleigh_scattering = vec3<f32>(
+            height_decay(params.rayleigh_coefficient.x, height, params.rayleigh_scale_height),
+            height_decay(params.rayleigh_coefficient.y, height, params.rayleigh_scale_height),
+            height_decay(params.rayleigh_coefficient.z, height, params.rayleigh_scale_height),
+        );
+        let rayleigh_intensity = rayleigh_scattering * phase_rayleigh(mu);
+        // The intensity values represent the fraction of light scattered from this point towards
+        // the viewer. We multiply them by total sunlight at x to get the total light scattered
+        // towards the viewer from x. This still needs to be attenuated as it represents the amount
+        // of light present before travelling and being scattered along the primary ray.
+        let total_incoming_sunlight = (mie_intensity + rayleigh_intensity) * total_sunlight_at_x;
+        primary_optical_depth_mie += mie_scattering * i_step_size;
+        primary_optical_depth_rayleigh += rayleigh_scattering * i_step_size;
+        let primary_optical_depth = primary_optical_depth_mie + primary_optical_depth_rayleigh;
+        let transmittance = exp(-primary_optical_depth);
+        primary_ray_color += transmittance * total_incoming_sunlight * i_step_size;
+    }
+
+    return primary_ray_color;
+}
+
 @group(0) @binding(0)
 var<uniform> nishita: Nishita;
 
@@ -158,19 +322,20 @@ fn main(@builtin(global_invocation_id) invocation_id: vec3<u32>, @builtin(num_wo
         }
     }
 
-    let render = render_nishita(
-        ray,
-        nishita.ray_origin,
-        nishita.sun_position,
-        nishita.sun_intensity,
-        nishita.planet_radius,
-        nishita.atmosphere_radius,
-        nishita.rayleigh_coefficient,
-        nishita.mie_coefficient,
-        nishita.rayleigh_scale_height,
-        nishita.mie_scale_height,
-        nishita.mie_direction,
-    );
+    let render = my_nishita(normalize(ray), nishita);
+    // let render = render_nishita(
+    //     ray,
+    //     nishita.ray_origin,
+    //     nishita.sun_position,
+    //     nishita.sun_intensity,
+    //     nishita.planet_radius,
+    //     nishita.atmosphere_radius,
+    //     nishita.rayleigh_coefficient,
+    //     nishita.mie_coefficient,
+    //     nishita.rayleigh_scale_height,
+    //     nishita.mie_scale_height,
+    //     nishita.mie_direction,
+    // );
 
     textureStore(
         image,

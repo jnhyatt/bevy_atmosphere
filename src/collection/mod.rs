@@ -5,7 +5,3 @@
 /// [`Nishita`](crate::collection::nishita::Nishita) sky model.
 #[cfg(any(doc, feature = "nishita"))]
 pub mod nishita;
-
-/// [`Gradient`](crate::collection::gradient::Gradient) sky model.
-#[cfg(any(doc, feature = "gradient"))]
-pub mod gradient;

@@ -1,12 +1,10 @@
-use crate::model::Atmospheric;
+use crate::model::{Atmospheric, RegisterAtmosphereModel};
 use bevy::{prelude::*, render::render_resource::ShaderType};
 
 /// The Nishita sky model.
 ///
 /// An atmospheric model that uses Rayleigh and Mie scattering to simulate a realistic sky.
-#[derive(Atmospheric, ShaderType, Reflect, Debug, Clone)]
-#[uniform(0, Nishita)]
-#[internal("shaders/nishita.wgsl")]
+#[derive(ShaderType, Reflect, Debug, Clone)]
 pub struct Nishita {
     /// Ray Origin (Default: `(0.0, 6372e3, 0.0)`).
     ///
@@ -53,6 +51,42 @@ pub struct Nishita {
     ///
     /// Controls the general direction of Mie scattering.
     pub mie_direction: f32,
+}
+
+impl Atmospheric for Nishita {
+    fn as_bind_group(
+        &self,
+        layout: &bevy::render::render_resource::BindGroupLayout,
+        render_device: &bevy::render::renderer::RenderDevice,
+        images: &bevy::render::render_asset::RenderAssets<bevy::render::texture::GpuImage>,
+        fallback_image: &bevy::render::texture::FallbackImage,
+    ) -> bevy::render::render_resource::BindGroup {
+        todo!()
+    }
+
+    fn clone_dynamic(&self) -> Box<dyn Atmospheric> {
+        todo!()
+    }
+
+    fn as_reflect(&self) -> &dyn Reflect {
+        todo!()
+    }
+
+    fn as_reflect_mut(&mut self) -> &mut dyn Reflect {
+        todo!()
+    }
+}
+
+impl RegisterAtmosphereModel for Nishita {
+    fn register(app: &mut App) {
+        todo!()
+    }
+
+    fn bind_group_layout(
+        render_device: &bevy::render::renderer::RenderDevice,
+    ) -> bevy::render::render_resource::BindGroupLayout {
+        todo!()
+    }
 }
 
 impl Default for Nishita {

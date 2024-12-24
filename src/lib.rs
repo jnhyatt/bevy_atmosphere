@@ -97,7 +97,4 @@ pub mod prelude {
 
     #[cfg(any(doc, feature = "nishita"))]
     pub use crate::collection::nishita::Nishita;
-
-    #[cfg(any(doc, feature = "gradient"))]
-    pub use crate::collection::gradient::Gradient;
 }

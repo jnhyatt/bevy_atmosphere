@@ -1,10 +1,14 @@
-use bevy::prelude::*;
+use bevy::{math::vec3, prelude::*};
 use bevy_atmosphere::prelude::*;
 use bevy_spectator::{Spectator, SpectatorPlugin};
 
 fn main() {
     println!("Demonstrates using the `Nishita` model\n\t- 1-9 number keys: Change preset\n\t- 0 number key: Remove `Nishita` model");
     App::new()
+        .insert_resource(AtmosphereSettings {
+            resolution: 1024,
+            ..default()
+        })
         .add_plugins((DefaultPlugins, AtmospherePlugin, SpectatorPlugin))
         .add_systems(Startup, setup)
         .add_systems(Update, change_nishita)
@@ -19,14 +23,15 @@ fn change_nishita(mut commands: Commands, keys: Res<ButtonInput<KeyCode>>) {
     if keys.just_pressed(KeyCode::Digit1) {
         info!("Changed to Atmosphere Preset 1 (Sunset)");
         commands.insert_resource(AtmosphereModel::new(Nishita {
-            sun_position: Vec3::new(0., 0., -1.),
+            sun_position: Vec3::new(0.0, 0.5, -1.0),
+            ray_origin: vec3(0.0, 6372e3, 10e6),
             ..default()
         }));
     } else if keys.just_pressed(KeyCode::Digit2) {
-        info!("Changed to Atmosphere Preset 2 (Noir Sunset)");
+        info!("Changed to Atmosphere Preset 2");
         commands.insert_resource(AtmosphereModel::new(Nishita {
             sun_position: Vec3::new(0., 0., -1.),
-            rayleigh_coefficient: Vec3::new(1e-5, 1e-5, 1e-5),
+            ray_origin: vec3(0.0, 6371.001e3, 0.0),
             ..default()
         }));
     } else if keys.just_pressed(KeyCode::Digit3) {
